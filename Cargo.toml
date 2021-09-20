@@ -1,0 +1,13 @@
+[package]
+name = "split-include"
+version = "0.1.0"
+authors = ["Romain Déoux <ext-romain.deoux@flowbird.group>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.33.3"
+log = "0.4.14"
+simple_logger = "1.13.0"
+
+[dev-dependencies]
+tempfile = "3.2.0"
