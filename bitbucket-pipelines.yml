@@ -3,6 +3,10 @@ image: rust
 pipelines:
   default:
     - step:
+        name: Build
+        script:
+          - cargo build --tests
+    - step:
         name: Test
         script:
           - cargo test
