@@ -1,13 +1,25 @@
-use clap::{App, Arg};
+use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version};
 use log::LevelFilter;
+use simple_logger::SimpleLogger;
 use split_include::Autoconf;
 
 fn main() {
-    let app = App::new("split-include").arg(Arg::with_name("directory").required(true));
+    let app = clap_app!((crate_name!()) =>
+        (version: crate_version!())
+        (author: crate_authors!())
+        (about: crate_description!())
+        (@arg verbose: -v --verbose)
+        (@arg directory: ...)
+    );
+    let matches = app.get_matches();
 
-    if let Some(directory) = app.get_matches().value_of_os("directory") {
-        simple_logger::SimpleLogger::new()
-            .with_level(LevelFilter::Info)
+    if let Some(directory) = matches.value_of_os("directory") {
+        SimpleLogger::new()
+            .with_level(if matches.is_present("verbose") {
+                LevelFilter::Trace
+            } else {
+                LevelFilter::Info
+            })
             .init()
             .ok();
 
