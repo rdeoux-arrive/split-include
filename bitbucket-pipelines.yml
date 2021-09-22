@@ -1,0 +1,8 @@
+image: rustlang/rust
+
+pipelines:
+  default:
+    - step:
+        name: Test
+        script:
+          - cargo test
