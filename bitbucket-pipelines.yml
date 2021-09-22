@@ -5,17 +5,20 @@ pipelines:
     - step:
         name: Build
         caches:
+          - cargo
           - rust-target
         script:
           - cargo build --tests
     - step:
         name: Test
         caches:
+          - cargo
           - rust-target
         script:
           - cargo test
 
 definitions:
   caches:
+    cargo: /usr/local/cargo
     rust-target: $BITBUCKET_CLONE_DIR/target
 
