@@ -3,6 +3,8 @@ name = "split-include"
 version = "0.1.0"
 authors = ["Romain Déoux <ext-romain.deoux@flowbird.group>"]
 edition = "2018"
+description = "Split an autoconf.h generated file into several formats (Assembler, C, Perl and Python)"
+publish = false
 
 [dependencies]
 clap = "2.33.3"
