@@ -1,4 +1,4 @@
-image: rustlang/rust
+image: rust
 
 pipelines:
   default:
@@ -6,3 +6,4 @@ pipelines:
         name: Test
         script:
           - cargo test
+
