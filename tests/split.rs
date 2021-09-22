@@ -1,9 +1,8 @@
 use log::info;
 use simple_logger::SimpleLogger;
-use split_include::Autoconf;
-use std::env::current_exe;
 use std::fs::{read_to_string, write};
 use std::io;
+use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
@@ -18,16 +17,13 @@ fn split() -> io::Result<()> {
     info!("create {:?}", &autoconf_h);
     write(autoconf_h, include_bytes!("autoconf.h"))?;
 
-    let autoconf = Autoconf::load(&tmp);
-    autoconf.gen_py(&tmp);
-    autoconf.gen_pl(&tmp);
-    autoconf.gen_h(&tmp);
-    autoconf.gen_inc(&tmp);
+    let bin = env!("CARGO_BIN_EXE_split-include");
+    info!("execute {} {:?}", bin, tmp.path());
+    let status = Command::new(bin).arg(tmp.path()).arg("-v").status()?;
+    assert!(status.success());
 
     let mut autoconf_py = tmp.path().to_path_buf();
     autoconf_py.push("autoconf.py");
-    let bin = current_exe()?;
-    let bin = bin.to_string_lossy();
     assert_eq!(
         read_to_string(autoconf_py)?,
         format!(include_str!("autoconf.py"), bin)
