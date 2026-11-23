@@ -3,7 +3,7 @@ name = "split-include"
 version = "0.1.0"
 authors = ["Romain Déoux <romain.deoux@arrive.com>"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Split an autoconf.h generated file into several formats (Assembler, C, Perl and Python)"
 publish = false
 

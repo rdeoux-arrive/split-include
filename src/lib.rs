@@ -6,9 +6,18 @@ use std::fs::{File, read_to_string};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub enum Directive {
-    Undef { name: String },
-    Define { name: String, value: String },
+/// Un réglage `CONFIG_<group>_<name>` ; `value` vaut `None` pour un `#undef`.
+struct Directive {
+    group: String,
+    name: String,
+    value: Option<String>,
+}
+
+impl Directive {
+    /// Valeur du réglage, ou `undef` s’il n’est pas défini.
+    fn value_or<'a>(&'a self, undef: &'a str) -> &'a str {
+        self.value.as_deref().unwrap_or(undef)
+    }
 }
 
 struct GeneratedBy;
@@ -27,13 +36,39 @@ impl Display for GeneratedBy {
 pub struct Autoconf(Vec<Directive>);
 
 impl Autoconf {
-    /// Ignore les réglages sans `_` : ils n'ont pas de préfixe de groupe.
-    fn push(&mut self, dir: Directive) {
-        let (Directive::Undef { name } | Directive::Define { name, .. }) = &dir;
-        if name.contains('_') {
-            self.0.push(dir);
-        } else {
-            warn!("ignore CONFIG_{name}: no group prefix");
+    /// Ajoute un réglage ; ignore ceux sans préfixe de groupe ou dont le nom
+    /// (sans le préfixe) n’est pas un identifiant valide.
+    fn push(&mut self, full_name: &str, value: Option<&str>) {
+        let Some((group, name)) = full_name.split_once('_') else {
+            warn!("ignore CONFIG_{full_name}: no group prefix");
+            return;
+        };
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            warn!("ignore CONFIG_{full_name}: {name:?} is not a valid identifier");
+            return;
+        }
+        self.0.push(Directive {
+            group: group.into(),
+            name: name.into(),
+            value: value.map(Into::into),
+        });
+    }
+
+    /// Signale deux groupes qui ont le même nom une fois le préfixe retiré :
+    /// `autoconf.py` et `autoconf.pl` n’ont qu’un seul espace de noms, la
+    /// dernière valeur l’emporte.
+    fn warn_flat_collisions(&self) {
+        let mut owners = HashMap::new();
+        for dir in &self.0 {
+            if let Some(group) = owners.insert(dir.name.as_str(), dir.group.as_str())
+                && group != dir.group
+            {
+                let (name, other) = (&dir.name, &dir.group);
+                warn!(
+                    "CONFIG_{group}_{name} and CONFIG_{other}_{name} are both {name:?} \
+                     in autoconf.py and autoconf.pl: the last one wins"
+                );
+            }
         }
     }
 
@@ -51,24 +86,22 @@ impl Autoconf {
         info!("load {}", filepath.display());
         let content = read_to_string(&filepath)
             .with_context(|| format!("failed to read {}", filepath.display()))?;
-        Ok(content.lines().fold(Self::default(), |mut autoconf, line| {
+        let mut autoconf = Self::default();
+        for line in content.lines() {
             if let Some(line) = line.strip_prefix("#define CONFIG_") {
-                if let Some(pos) = line.find(' ') {
-                    let (name, val) = line.split_at(pos);
-                    let name = name.into();
-                    let value = val[1..].into();
+                if let Some((name, value)) = line.split_once(' ') {
                     debug!("define {name:?} {value:?}");
-                    autoconf.push(Directive::Define { name, value });
+                    autoconf.push(name, Some(value));
                 } else {
                     warn!("ignore CONFIG_{line}: no value");
                 }
             } else if let Some(name) = line.strip_prefix("#undef CONFIG_") {
-                let name = name.into();
                 debug!("undef {name:?}");
-                autoconf.push(Directive::Undef { name });
+                autoconf.push(name, None);
             }
-            autoconf
-        }))
+        }
+        autoconf.warn_flat_collisions();
+        Ok(autoconf)
     }
 
     /// Generates `autoconf.py` in `directory`.
@@ -89,13 +122,7 @@ impl Autoconf {
         writeln!(out, "# {GeneratedBy}")?;
         writeln!(out)?;
         for dir in &self.0 {
-            let (name, val) = match dir {
-                Directive::Undef { name } => (name, "False"),
-                Directive::Define { name, value } => (name, value.as_ref()),
-            };
-            if let Some(pos) = name.find('_') {
-                writeln!(out, "{} = {}", &name[pos + 1..], val)?;
-            }
+            writeln!(out, "{} = {}", dir.name, dir.value_or("False"))?;
         }
         Ok(())
     }
@@ -117,45 +144,19 @@ impl Autoconf {
         writeln!(out, "# {GeneratedBy}")?;
         writeln!(out)?;
         for dir in &self.0 {
-            let (name, val) = match dir {
-                Directive::Undef { name } => (name, "0"),
-                Directive::Define { name, value } => (name, value.as_ref()),
-            };
-            if let Some(pos) = name.find('_') {
-                writeln!(out, "${} = {};", &name[pos + 1..], val)?;
-            }
+            // Perl interpole `$` et `@` dans les chaînes entre guillemets.
+            let value = dir.value_or("0").replace('$', "\\$").replace('@', "\\@");
+            writeln!(out, "${} = {value};", dir.name)?;
         }
         writeln!(out)?;
         writeln!(out, "1;")?;
         Ok(())
     }
 
-    fn split(&self) -> HashMap<&str, Self> {
-        let mut split = HashMap::new();
+    fn split(&self) -> HashMap<&str, Vec<&Directive>> {
+        let mut split: HashMap<&str, Vec<&Directive>> = HashMap::new();
         for dir in &self.0 {
-            match dir {
-                Directive::Undef { name } => {
-                    if let Some((hash_key, name)) = name.split_once('_') {
-                        let name = name.into();
-                        split
-                            .entry(hash_key)
-                            .or_insert_with(Self::default)
-                            .0
-                            .push(Directive::Undef { name });
-                    }
-                }
-                Directive::Define { name, value } => {
-                    if let Some((hash_key, name)) = name.split_once('_') {
-                        let name = name.into();
-                        let value = value.clone();
-                        split
-                            .entry(hash_key)
-                            .or_insert_with(Self::default)
-                            .0
-                            .push(Directive::Define { name, value });
-                    }
-                }
-            }
+            split.entry(&dir.group).or_default().push(dir);
         }
         split
     }
@@ -192,7 +193,7 @@ impl Autoconf {
 
         const TAG: &str = "// end";
 
-        for (key, autoconf) in self.split() {
+        for (key, directives) in self.split() {
             let filename = format!("config.{}.h", key.to_lowercase());
 
             let template = find_template(directory.as_ref(), &filename)
@@ -222,12 +223,10 @@ impl Autoconf {
                 writeln!(out, "#define AUTOCONF_{key}_H")?;
                 writeln!(out)?;
             }
-            for dir in &autoconf.0 {
-                match dir {
-                    Directive::Undef { name } => writeln!(out, "#undef {name}"),
-                    Directive::Define { name, value } => {
-                        writeln!(out, "#define {name} {value}")
-                    }
+            for dir in directives {
+                match &dir.value {
+                    None => writeln!(out, "#undef {}", dir.name),
+                    Some(value) => writeln!(out, "#define {} {value}", dir.name),
                 }?;
             }
             if let Some(tpl) = template {
@@ -258,7 +257,7 @@ impl Autoconf {
     where
         A: AsRef<Path>,
     {
-        for (key, autoconf) in self.split() {
+        for (key, directives) in self.split() {
             let mut filepath = directory.as_ref().to_owned();
             filepath.push(format!("config.{}.inc", key.to_lowercase()));
             info!("create {}", filepath.display());
@@ -266,12 +265,8 @@ impl Autoconf {
                 .with_context(|| format!("failed to create {}", filepath.display()))?;
             writeln!(out, "; {GeneratedBy}")?;
             writeln!(out)?;
-            for dir in &autoconf.0 {
-                let (name, val) = match dir {
-                    Directive::Undef { name } => (name, "0"),
-                    Directive::Define { name, value } => (name, value.as_ref()),
-                };
-                writeln!(out, "{name} EQU {val}")?;
+            for dir in directives {
+                writeln!(out, "{} EQU {}", dir.name, dir.value_or("0"))?;
             }
             writeln!(out)?;
             writeln!(out, "    END")?;
