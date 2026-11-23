@@ -11,7 +11,7 @@ publish = false
 anyhow = "1.0.105"
 clap = { version = "4.6.9", features = ["derive"] }
 log = "0.4.35"
-simple_logger = "5.2.0"
+simple_logger = { version = "5.2.0", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27.0"
