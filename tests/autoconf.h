@@ -6,6 +6,9 @@
 #define CONFIG_FEATUREA_OPTION1 1
 #undef CONFIG_FEATUREA_OPTION2
 
+/* Sans préfixe de groupe : ignoré */
+#define CONFIG_SMP 1
+
 /* Feature B */
 #undef CONFIG_FEATUREB_OPTION3
 #define CONFIG_FEATUREB_OPTION4 2

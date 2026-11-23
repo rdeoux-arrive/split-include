@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use core::fmt::{self, Display, Formatter};
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs::{File, read_to_string};
 use std::io::Write;
@@ -29,8 +29,14 @@ impl Display for GeneratedBy {
 pub struct Autoconf(Vec<Directive>);
 
 impl Autoconf {
+    /// Ignore les réglages sans `_` : ils n'ont pas de préfixe de groupe.
     fn push(&mut self, dir: Directive) {
-        self.0.push(dir);
+        let (Directive::Undef { name } | Directive::Define { name, .. }) = &dir;
+        if name.contains('_') {
+            self.0.push(dir);
+        } else {
+            warn!("ignore CONFIG_{name}: no group prefix");
+        }
     }
 
     /// Loads `autoconf.h` from `directory`.
@@ -129,8 +135,8 @@ impl Autoconf {
         for dir in &self.0 {
             match dir {
                 Directive::Undef { name } => {
-                    if let Some(hash_key) = name.split('_').next() {
-                        let name = name[hash_key.len() + 1..].into();
+                    if let Some((hash_key, name)) = name.split_once('_') {
+                        let name = name.into();
                         split
                             .entry(hash_key)
                             .or_insert_with(Self::default)
@@ -139,8 +145,8 @@ impl Autoconf {
                     }
                 }
                 Directive::Define { name, value } => {
-                    if let Some(hash_key) = name.split('_').next() {
-                        let name = name[hash_key.len() + 1..].into();
+                    if let Some((hash_key, name)) = name.split_once('_') {
+                        let name = name.into();
                         let value = value.clone();
                         split
                             .entry(hash_key)
