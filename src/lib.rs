@@ -2,13 +2,13 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
 
+use anyhow::{Context, Result};
 use core::fmt::{self, Display, Formatter};
-use log::{debug, error, info};
+use log::{debug, info};
 use std::collections::HashMap;
-use std::fs::{read_to_string, File};
+use std::fs::{File, read_to_string};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::exit;
 
 pub enum Directive {
     Undef { name: String },
@@ -37,77 +37,95 @@ impl Autoconf {
         self.0.push(dir);
     }
 
-    pub fn load<A: AsRef<Path>>(directory: A) -> Self {
+    /// Loads `autoconf.h` from `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `autoconf.h` cannot be read.
+    pub fn load<A>(directory: A) -> Result<Self>
+    where
+        A: AsRef<Path>,
+    {
         let mut filepath = directory.as_ref().to_owned();
         filepath.push("autoconf.h");
         info!("load {}", filepath.display());
-        read_to_string(filepath)
-            .unwrap_or_else(|err| {
-                error!("failed to read autoconf.h: {err}");
-                exit(err.raw_os_error().unwrap_or(1))
-            })
-            .lines()
-            .fold(Self::default(), |mut autoconf, line| {
-                if let Some(line) = line.strip_prefix("#define CONFIG_") {
-                    if let Some(pos) = line.find(' ') {
-                        let (name, val) = line.split_at(pos);
-                        let name = name.into();
-                        let value = val[1..].into();
-                        debug!("define {name:?} {value:?}");
-                        autoconf.push(Directive::Define { name, value });
-                    }
-                } else if let Some(name) = line.strip_prefix("#undef CONFIG_") {
+        let content = read_to_string(&filepath)
+            .with_context(|| format!("failed to read {}", filepath.display()))?;
+        Ok(content.lines().fold(Self::default(), |mut autoconf, line| {
+            if let Some(line) = line.strip_prefix("#define CONFIG_") {
+                if let Some(pos) = line.find(' ') {
+                    let (name, val) = line.split_at(pos);
                     let name = name.into();
-                    debug!("undef {name:?}");
-                    autoconf.push(Directive::Undef { name });
+                    let value = val[1..].into();
+                    debug!("define {name:?} {value:?}");
+                    autoconf.push(Directive::Define { name, value });
                 }
-                autoconf
-            })
+            } else if let Some(name) = line.strip_prefix("#undef CONFIG_") {
+                let name = name.into();
+                debug!("undef {name:?}");
+                autoconf.push(Directive::Undef { name });
+            }
+            autoconf
+        }))
     }
 
-    pub fn gen_py<A: AsRef<Path>>(&self, directory: A) {
+    /// Generates `autoconf.py` in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be created or written.
+    pub fn gen_py<A>(&self, directory: A) -> Result<()>
+    where
+        A: AsRef<Path>,
+    {
         let mut filepath = directory.as_ref().to_owned();
         filepath.push("autoconf.py");
         info!("create {}", filepath.display());
-        let mut out = File::create(&filepath).unwrap_or_else(|err| {
-            error!("failed to create {}: {err}", filepath.display());
-            exit(err.raw_os_error().unwrap_or(1))
-        });
-        writeln!(out, "# coding: utf-8").ok();
-        writeln!(out, "# {GeneratedBy}").ok();
-        writeln!(out).ok();
+        let mut out = File::create(&filepath)
+            .with_context(|| format!("failed to create {}", filepath.display()))?;
+        writeln!(out, "# coding: utf-8")?;
+        writeln!(out, "# {GeneratedBy}")?;
+        writeln!(out)?;
         for dir in &self.0 {
             let (name, val) = match dir {
                 Directive::Undef { name } => (name, "False"),
                 Directive::Define { name, value } => (name, value.as_ref()),
             };
             if let Some(pos) = name.find('_') {
-                writeln!(out, "{} = {}", &name[pos + 1..], val).ok();
+                writeln!(out, "{} = {}", &name[pos + 1..], val)?;
             }
         }
+        Ok(())
     }
 
-    pub fn gen_pl<A: AsRef<Path>>(&self, directory: A) {
+    /// Generates `autoconf.pl` in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be created or written.
+    pub fn gen_pl<A>(&self, directory: A) -> Result<()>
+    where
+        A: AsRef<Path>,
+    {
         let mut filepath = directory.as_ref().to_owned();
         filepath.push("autoconf.pl");
         info!("create {}", filepath.display());
-        let mut out = File::create(&filepath).unwrap_or_else(|err| {
-            error!("failed to create {}: {err}", filepath.display());
-            exit(err.raw_os_error().unwrap_or(1))
-        });
-        writeln!(out, "# {GeneratedBy}").ok();
-        writeln!(out).ok();
+        let mut out = File::create(&filepath)
+            .with_context(|| format!("failed to create {}", filepath.display()))?;
+        writeln!(out, "# {GeneratedBy}")?;
+        writeln!(out)?;
         for dir in &self.0 {
             let (name, val) = match dir {
                 Directive::Undef { name } => (name, "0"),
                 Directive::Define { name, value } => (name, value.as_ref()),
             };
             if let Some(pos) = name.find('_') {
-                writeln!(out, "${} = {};", &name[pos + 1..], val).ok();
+                writeln!(out, "${} = {};", &name[pos + 1..], val)?;
             }
         }
-        writeln!(out).ok();
-        writeln!(out, "1;").ok();
+        writeln!(out)?;
+        writeln!(out, "1;")?;
+        Ok(())
     }
 
     fn split(&self) -> HashMap<&str, Self> {
@@ -140,7 +158,16 @@ impl Autoconf {
         split
     }
 
-    pub fn gen_h<A: AsRef<Path>>(&self, directory: A) {
+    /// Generates one `config.<key>.h` per key in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a template cannot be read or an output file
+    /// cannot be created or written.
+    pub fn gen_h<A>(&self, directory: A) -> Result<()>
+    where
+        A: AsRef<Path>,
+    {
         fn find_template(directory: &Path, filename: &str) -> Option<PathBuf> {
             if let Some(var) = std::env::var_os("CONFIG_TEMPLATES") {
                 for mut filepath in std::env::split_paths(&var) {
@@ -166,34 +193,32 @@ impl Autoconf {
         for (key, autoconf) in self.split() {
             let filename = format!("config.{}.h", key.to_lowercase());
 
-            let template = find_template(directory.as_ref(), &filename).map(|template| {
-                info!("load {}", template.display());
-                read_to_string(&template).unwrap_or_else(|err| {
-                    error!("failed to read {}: {err}", template.display());
-                    exit(err.raw_os_error().unwrap_or(1))
+            let template = find_template(directory.as_ref(), &filename)
+                .map(|template| {
+                    info!("load {}", template.display());
+                    read_to_string(&template)
+                        .with_context(|| format!("failed to read {}", template.display()))
                 })
-            });
+                .transpose()?;
 
             let mut filepath = directory.as_ref().to_owned();
             filepath.push(filename);
 
             info!("create {}", filepath.display());
-            let mut out = File::create(&filepath).unwrap_or_else(|err| {
-                error!("failed to create {}: {err}", filepath.display());
-                exit(err.raw_os_error().unwrap_or(1))
-            });
+            let mut out = File::create(&filepath)
+                .with_context(|| format!("failed to create {}", filepath.display()))?;
             if let Some(tpl) = &template {
                 for line in tpl.lines() {
                     if line == TAG {
                         break;
                     }
-                    writeln!(out, "{line}").ok();
+                    writeln!(out, "{line}")?;
                 }
             } else {
-                writeln!(out, "/* {GeneratedBy} */").ok();
-                writeln!(out, "#ifndef AUTOCONF_{key}_H").ok();
-                writeln!(out, "#define AUTOCONF_{key}_H").ok();
-                writeln!(out).ok();
+                writeln!(out, "/* {GeneratedBy} */")?;
+                writeln!(out, "#ifndef AUTOCONF_{key}_H")?;
+                writeln!(out, "#define AUTOCONF_{key}_H")?;
+                writeln!(out)?;
             }
             for dir in &autoconf.0 {
                 match dir {
@@ -201,8 +226,7 @@ impl Autoconf {
                     Directive::Define { name, value } => {
                         writeln!(out, "#define {name} {value}")
                     }
-                }
-                .ok();
+                }?;
             }
             if let Some(tpl) = template {
                 let mut lines = tpl.lines();
@@ -211,37 +235,45 @@ impl Autoconf {
                         break;
                     }
                 }
-                writeln!(out, "{TAG}").ok();
+                writeln!(out, "{TAG}")?;
                 for line in lines {
-                    writeln!(out, "{line}").ok();
+                    writeln!(out, "{line}")?;
                 }
             } else {
-                writeln!(out).ok();
-                writeln!(out, "#endif /* !defined AUTOCONF_{key}_H */").ok();
+                writeln!(out)?;
+                writeln!(out, "#endif /* !defined AUTOCONF_{key}_H */")?;
             }
         }
+        Ok(())
     }
 
-    pub fn gen_inc<A: AsRef<Path>>(&self, directory: A) {
+    /// Generates one `config.<key>.inc` per key in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a file cannot be created or written.
+    pub fn gen_inc<A>(&self, directory: A) -> Result<()>
+    where
+        A: AsRef<Path>,
+    {
         for (key, autoconf) in self.split() {
             let mut filepath = directory.as_ref().to_owned();
             filepath.push(format!("config.{}.inc", key.to_lowercase()));
             info!("create {}", filepath.display());
-            let mut out = File::create(&filepath).unwrap_or_else(|err| {
-                error!("failed to create {}: {err}", filepath.display());
-                exit(err.raw_os_error().unwrap_or(1))
-            });
-            writeln!(out, "; {GeneratedBy}").ok();
-            writeln!(out).ok();
+            let mut out = File::create(&filepath)
+                .with_context(|| format!("failed to create {}", filepath.display()))?;
+            writeln!(out, "; {GeneratedBy}")?;
+            writeln!(out)?;
             for dir in &autoconf.0 {
                 let (name, val) = match dir {
                     Directive::Undef { name } => (name, "0"),
                     Directive::Define { name, value } => (name, value.as_ref()),
                 };
-                writeln!(out, "{name} EQU {val}").ok();
+                writeln!(out, "{name} EQU {val}")?;
             }
-            writeln!(out).ok();
-            writeln!(out, "    END").ok();
+            writeln!(out)?;
+            writeln!(out, "    END")?;
         }
+        Ok(())
     }
 }
