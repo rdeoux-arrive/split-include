@@ -6,6 +6,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
+#[allow(clippy::similar_names)] // shortcut: noms parallèles voulus (autoconf_py/pl, featurea/b), pas de boucle
 fn split() -> io::Result<()> {
     SimpleLogger::new().init().ok();
 
@@ -14,7 +15,7 @@ fn split() -> io::Result<()> {
 
     let mut autoconf_h = tmp.path().to_path_buf();
     autoconf_h.push("autoconf.h");
-    info!("create {:?}", &autoconf_h);
+    info!("create {}", autoconf_h.display());
     write(autoconf_h, include_bytes!("autoconf.h"))?;
 
     let bin = env!("CARGO_BIN_EXE_split-include");
