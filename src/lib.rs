@@ -59,6 +59,8 @@ impl Autoconf {
                     let value = val[1..].into();
                     debug!("define {name:?} {value:?}");
                     autoconf.push(Directive::Define { name, value });
+                } else {
+                    warn!("ignore CONFIG_{line}: no value");
                 }
             } else if let Some(name) = line.strip_prefix("#undef CONFIG_") {
                 let name = name.into();
