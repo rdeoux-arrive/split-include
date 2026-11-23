@@ -138,6 +138,34 @@ fn name_starting_with_digit_is_ignored() -> io::Result<()> {
 }
 
 #[test]
+fn name_with_invalid_character_is_ignored() -> io::Result<()> {
+    let (_tmp, work) = setup(include_bytes!("invalid.autoconf.h"))?;
+
+    let output = run(&work, None)?;
+    assert!(output.status.success());
+    assert!(logs(&output).contains("CONFIG_A_B(x)"));
+    let py = read_to_string(work.join("autoconf.py"))?;
+    assert!(py.contains("OK = 1") && !py.contains("B(x)"));
+    Ok(())
+}
+
+#[test]
+fn template_without_marker_fails() -> io::Result<()> {
+    let (tmp, work) = setup(include_bytes!("template.autoconf.h"))?;
+    let templates = tmp.path().join("templates");
+    create_dir(&templates)?;
+    write(
+        templates.join("config.featurea.h"),
+        include_bytes!("template.no_marker.h"),
+    )?;
+
+    let output = run(&work, None)?;
+    assert!(!output.status.success());
+    assert!(logs(&output).contains("// end"));
+    Ok(())
+}
+
+#[test]
 fn perl_does_not_interpolate_strings() -> io::Result<()> {
     let (_tmp, work) = setup(include_bytes!("perl.autoconf.h"))?;
 

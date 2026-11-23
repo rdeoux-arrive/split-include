@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use core::fmt::{self, Display, Formatter};
 use log::{debug, info, warn};
 use std::collections::HashMap;
@@ -43,7 +43,12 @@ impl Autoconf {
             warn!("ignore CONFIG_{full_name}: no group prefix");
             return;
         };
-        if !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        let is_word = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if group.is_empty() || !is_word(group) {
+            warn!("ignore CONFIG_{full_name}: {group:?} is not a valid group");
+            return;
+        }
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') || !is_word(name) {
             warn!("ignore CONFIG_{full_name}: {name:?} is not a valid identifier");
             return;
         }
@@ -199,8 +204,14 @@ impl Autoconf {
             let template = find_template(directory.as_ref(), &filename)
                 .map(|template| {
                     info!("load {}", template.display());
-                    read_to_string(&template)
-                        .with_context(|| format!("failed to read {}", template.display()))
+                    let tpl = read_to_string(&template)
+                        .with_context(|| format!("failed to read {}", template.display()))?;
+                    ensure!(
+                        tpl.lines().any(|line| line == TAG),
+                        "{} has no {TAG:?} line",
+                        template.display()
+                    );
+                    Ok(tpl)
                 })
                 .transpose()?;
 
