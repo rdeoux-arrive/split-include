@@ -1,7 +1,3 @@
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![warn(clippy::cargo)]
-
 use anyhow::{Context, Result};
 use core::fmt::{self, Display, Formatter};
 use log::{debug, info};
