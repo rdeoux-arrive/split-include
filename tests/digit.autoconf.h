@@ -1,0 +1,2 @@
+#define CONFIG_ARM_64BIT 1
+#define CONFIG_ARM_V8 1
