@@ -94,7 +94,9 @@ impl Autoconf {
         let mut autoconf = Self::default();
         for line in content.lines() {
             if let Some(line) = line.strip_prefix("#define CONFIG_") {
-                if let Some((name, value)) = line.split_once(' ') {
+                if let Some((name, value)) = line.split_once(' ')
+                    && !value.trim().is_empty()
+                {
                     debug!("define {name:?} {value:?}");
                     autoconf.push(name, Some(value));
                 } else {

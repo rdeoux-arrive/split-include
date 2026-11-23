@@ -150,6 +150,18 @@ fn name_with_invalid_character_is_ignored() -> io::Result<()> {
 }
 
 #[test]
+fn define_with_empty_value_is_ignored() -> io::Result<()> {
+    let (_tmp, work) = setup(include_bytes!("empty.autoconf.h"))?;
+
+    let output = run(&work, None)?;
+    assert!(output.status.success());
+    assert!(logs(&output).contains("CONFIG_A_EMPTY"));
+    let py = read_to_string(work.join("autoconf.py"))?;
+    assert!(py.contains("OK = 1") && !py.contains("EMPTY"));
+    Ok(())
+}
+
+#[test]
 fn template_without_marker_fails() -> io::Result<()> {
     let (tmp, work) = setup(include_bytes!("template.autoconf.h"))?;
     let templates = tmp.path().join("templates");
